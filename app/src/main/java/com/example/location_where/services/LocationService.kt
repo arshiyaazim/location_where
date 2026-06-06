@@ -1,4 +1,4 @@
-package com.example.location_where
+package com.example.location_where.services
 
 import android.annotation.SuppressLint
 import android.app.*
@@ -11,6 +11,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.location_where.GeofenceBroadcastReceiver
+import com.example.location_where.MainActivity
+import com.example.location_where.R
 import com.example.location_where.api.ApiService
 import com.example.location_where.data.repository.LocationRepository
 import com.google.android.gms.location.*
