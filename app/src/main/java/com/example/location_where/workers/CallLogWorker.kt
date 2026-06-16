@@ -24,7 +24,15 @@ class CallLogWorker @AssistedInject constructor(
         val sharedPrefs = applicationContext.getSharedPreferences("MonitoringPrefs", Context.MODE_PRIVATE)
         val lastSyncTimestamp = sharedPrefs.getLong("last_call_sync", 0L)
         
-        val newCalls = getNewCalls(lastSyncTimestamp)
+        val newCalls = try {
+            getNewCalls(lastSyncTimestamp)
+        } catch (e: SecurityException) {
+            Log.e("CallLogWorker", "Permission denied for call log", e)
+            return Result.failure()
+        } catch (e: Exception) {
+            Log.e("CallLogWorker", "Failed to get call logs", e)
+            return Result.failure()
+        }
         
         var allSuccess = true
         var latestTimestamp = lastSyncTimestamp

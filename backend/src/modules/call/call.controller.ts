@@ -14,9 +14,10 @@ export const logCall = async (req: any, res: Response) => {
 
 export const uploadRecording = async (req: Request, res: Response) => {
   try {
-    const { callLogId } = req.body;
+    const { callLogId, checksum } = req.body;
     if (!req.file) throw new Error('No file uploaded');
-    const result = await callService.uploadRecording(callLogId, req.file);
+    if (!checksum) throw new Error('Recording checksum is required');
+    const result = await callService.uploadRecording(callLogId, req.file, checksum);
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

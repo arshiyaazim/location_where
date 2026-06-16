@@ -4,7 +4,7 @@ import { LockOutlined, UnlockOutlined, NotificationOutlined, MessageOutlined, Wa
 import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const RemoteControlPage: React.FC = () => {
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
@@ -24,7 +24,7 @@ const RemoteControlPage: React.FC = () => {
         return;
     }
     try {
-        await api.post('/device/remote-lock', {
+        await api.post('/device/commands', {
             employeeId: selectedEmployee,
             commandType: type,
             payload

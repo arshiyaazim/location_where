@@ -1,10 +1,9 @@
 package com.example.location_where.utils
 
-import android.util.Base64
+import com.example.location_where.BuildConfig
 import java.io.*
 import java.security.MessageDigest
 import javax.crypto.Cipher
-import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -12,16 +11,13 @@ import javax.crypto.spec.SecretKeySpec
 object EncryptionUtils {
 
     private const val ALGORITHM = "AES/CBC/PKCS5Padding"
-    private const val KEY_SIZE = 32 // 256 bits
-    private const val IV_SIZE = 16  // 128 bits
+    private val IV_BYTES = BuildConfig.ENCRYPTION_IV.toByteArray()
 
-    // In a real app, retrieve these securely (e.g., from server or Keystore)
-    private const val PASSPHRASE = "your_secret_passphrase_here"
-    private val IV_BYTES = "0123456789012345".toByteArray()
+    private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
 
     private fun getSecretKey(): SecretKeySpec {
         val digest = MessageDigest.getInstance("SHA-256")
-        val keyBytes = digest.digest(PASSPHRASE.toByteArray())
+        val keyBytes = digest.digest(BuildConfig.ENCRYPTION_PASSPHRASE.toByteArray())
         return SecretKeySpec(keyBytes, "AES")
     }
 
@@ -49,6 +45,6 @@ object EncryptionUtils {
                 digest.update(buffer, 0, read)
             }
         }
-        return Base64.encodeToString(digest.digest(), Base64.NO_WRAP)
+        return digest.digest().toHexString()
     }
 }

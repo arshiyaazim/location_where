@@ -10,120 +10,51 @@ This is an **Employee Monitoring Android App** (Kotlin, Hilt, Room, Retrofit) wi
 - **TokenManager** (DataStore-based) with AuthInterceptor for JWT refresh
 - **LocationService** (foreground service): GPS tracking every 30s (60s on low battery), geofence registration from server, battery-adaptive intervals
 - **GeofenceBroadcastReceiver**: Reports EXIT breaches to backend, shows local notification
-- **SimCheckWorker**: Periodic (1hr) SIM ICCID comparison, alerts on change
+- **SimCheckWorker**: Periodic (1hr) SIM ICCID comparison, alerts on change (Hilt-injected)
 - **LocationSyncWorker**: Periodic sync of locally-cached locations (Room DB) when network available
+- **CallLogWorker**: Periodic sync of device call logs to `/api/v1/calls/log`
+- **CallRecordingService**: Monitors call states and records audio, encrypts with AES-256 before upload
+- **CommandWorker**: Polls for remote commands (`LOCK`, `WIPE`, `SIREN`, `MESSAGE`)
+- **MonitoringFcmService**: Receives real-time remote commands via FCM
+- **ConsentActivity**: Legal consent flow with backend confirmation
+- **Device Registration**: Automatically sends device info (FCM token, model, etc.) to backend
+- **Anti-Tamper**: Root detection (RootBeer) and Device Admin integration
 - **Room DB**: LocationEntity/Dao/Database for offline location caching
-- **LocationRepository**: Saves locally + attempts immediate API upload
-- **Hilt DI**: NetworkModule (Retrofit + OkHttp), DatabaseModule (Room)
-- **DeviceAdminReceiver**: Registered for uninstall prevention
-- **BootReceiver**: Restarts service on device boot
-- **ApiService endpoints defined**: login, refreshToken, updateLocation, reportSimChange, uploadCallLog, getPendingCommands, markCommandExecuted, getGeofences, reportGeofenceBreach
-
-### Backend (Node.js + Express + Prisma)
-- Full Prisma schema with models: Employee, AdminUser, LocationLog, Geofence, GeofenceAlert, SimChangeLog, CallLog, DeviceInfo, RemoteCommand, Alert, AuditLog
-- Module structure with service/controller/routes for: auth, employee, location, sim, call, device, alert, report
-- Middleware: JWT auth, RBAC, Zod validation, rate limiting
-- Config: PostgreSQL (Prisma), Redis, Firebase Admin, AWS S3
-- Utilities: logger, encryption (AES-256-CBC), SMS sender, PDF generator
+- **Hilt DI**: Full dependency injection setup
+- **Java 17 / Kotlin 2.0**: Modern build configuration
 
 ## What Needs to Be Built (Remaining Work)
 
 ### Android App — HIGH PRIORITY
 
-1. **Call Log Monitoring Service**
-   - A service/worker that periodically reads the device call log (`CallLog.Calls`) and uploads new entries to `/api/v1/calls/log`
-   - Track last-synced call timestamp in SharedPreferences/DataStore to avoid duplicates
-   - Fields needed: callType (INCOMING/OUTGOING/MISSED), phoneNumber, duration, startedAt, endedAt
+1. **Proper Dashboard UI (MainActivity)**
+   - Show real-time status: GPS (Active/Inactive), Battery Level, SIM Status, Last Sync Time
+   - Add status indicators (Green/Red) for monitoring services
+   - The current UI is functional but needs better visual feedback
 
-2. **Call Recording (if legally permitted)**
-   - Use `MediaRecorder` or accessibility approach to record calls
-   - Encrypt recording with AES-256 before upload
-   - Upload encrypted file to `/api/v1/calls/upload-recording` (multipart)
-   - Store recording status in local DB
+2. **Network State Awareness / Manual Queueing**
+   - Implement a manual queue for direct API calls in `LocationService` (e.g., geofence breaches) when offline
+   - Ensure these "immediate" events are flushed as soon as network returns, even before the next periodic sync
 
-3. **Remote Command Execution**
-   - A periodic worker (every 5 min) that polls `/api/v1/device/commands/pending`
-   - Execute commands based on `commandType`:
-     - `LOCK`: Use DevicePolicyManager to lock screen
-     - `UNLOCK`: Remove lock (if admin active)
-     - `WIPE`: Factory reset via DevicePolicyManager
-     - `SIREN`: Play loud alarm sound using MediaPlayer
-     - `MESSAGE`: Show full-screen alert dialog
-   - After execution, call `/api/v1/device/commands/executed` with commandId
-   - Handle failures gracefully, retry logic
+3. **Anti-Tamper Enhancements**
+   - Implement `AlarmManager` heartbeat to detect if the app has been force-stopped for a long time
+   - Add more robust root detection (detecting Magisk/Zygisk)
+   - Send "App Offline" alert to backend if the heartbeat stops
 
-4. **Device Info Registration**
-   - On first login or app update, send device info to backend: model, manufacturer, Android version, app version, IMEI (if accessible), FCM token
-   - Create a `POST /api/v1/device/register` endpoint call
+4. **Self-Monitoring / Health Check**
+   - Periodically check if `LocationService` and `CallRecordingService` are actually running and restart them if needed (within OS limits)
 
-5. **FCM Push Notification Integration**
-   - Add Firebase Cloud Messaging dependency
-   - `FirebaseMessagingService` subclass to receive push notifications
-   - Handle incoming remote command pushes (instead of just polling)
-   - Update FCM token on refresh → send to backend
+### Backend — HIGH PRIORITY (To be deployed/verified)
 
-6. **Anti-Tamper / Uninstall Prevention**
-   - Detect if Device Admin is disabled → send alert
-   - Root detection using RootBeer (already in dependencies) → alert on rooted device
-   - Detect app being force-stopped or cleared (use AlarmManager heartbeat)
-   - Package removal detection via `ACTION_PACKAGE_REMOVED` (limited on newer Android)
+1. **Admin Web Dashboard API refinements**
+   - Ensure all endpoints for live tracking and report generation are fully functional
+   - WebSocket/SSE for real-time dashboard updates
 
-7. **Fix SimCheckWorker**
-   - Currently uses `RetrofitClient.instance` directly instead of Hilt-injected ApiService
-   - Convert to `@HiltWorker` with `@AssistedInject`
-   - Use TokenManager for actual auth token instead of hardcoded "YOUR_MOCK_TOKEN"
+2. **S3 Storage Verification**
+   - Verify that call recordings are correctly uploaded and accessible only via admin pannel
 
-8. **Consent Screen**
-   - Before activating monitoring, show a legal consent screen
-   - Employee must acknowledge monitoring terms
-   - Send consent confirmation to `POST /api/v1/employees/:id/consent`
-   - Store consent status locally
-
-9. **Proper Dashboard UI (MainActivity)**
-   - Show: tracking status (active/inactive), last known location, battery level, SIM status, geofence status
-   - The current UI is mostly scaffold/template; replace with a proper monitoring dashboard
-   - Make the FAB action contextual (start/stop is admin-controlled)
-
-10. **Network State Awareness**
-    - Detect connectivity changes, queue all API calls when offline
-    - Flush queue when connectivity returns (WorkManager constraints partially handle this, but direct API calls in LocationService don't)
-
-### Backend — HIGH PRIORITY
-
-1. **Admin Web Dashboard API endpoints** (if not already complete in controllers):
-   - Live location map data: `GET /api/v1/location/live` should return latest location per employee with Redis caching
-   - Employee list with last-seen, status
-   - Alert management: mark read, filter by type/severity
-   - Remote command issuance: `POST /api/v1/device/commands` (admin creates command)
-   - Report generation: attendance reports, location history, call logs as PDF
-
-2. **Firebase Push Notification Sending**
-   - When a remote command is created, push notification to employee's device via FCM
-   - Alert notifications to admin devices on critical events (SIM change, geofence breach)
-
-3. **Geofence CRUD**
-   - `POST /api/v1/geofence` - Create geofence
-   - `PUT /api/v1/geofence/:id` - Update
-   - `DELETE /api/v1/geofence/:id` - Delete
-   - `GET /api/v1/geofence` - List (already called by app)
-
-4. **Call Recording Upload & Storage**
-   - `POST /api/v1/calls/upload-recording` - Accept multipart encrypted audio
-   - Store in AWS S3 with server-side encryption
-   - Link recording to CallLog entry
-
-5. **Device Heartbeat & Offline Detection**
-   - Track last communication timestamp per device
-   - Background job that flags devices offline after X minutes → create APP_OFFLINE alert
-
-6. **Report Module Implementation**
-   - Daily/weekly attendance reports based on location data
-   - Export as PDF (pdf.generator.ts utility exists)
-   - Employee movement history with timestamps
-
-7. **WebSocket/SSE for Real-time Dashboard**
-   - Live location updates pushed to admin dashboard
-   - Real-time alert notifications
+3. **FCM Sending Logic**
+   - Ensure the backend correctly triggers push notifications when an admin issues a command
 
 ### Build & Configuration Issues to Fix
 

@@ -1,10 +1,10 @@
 package com.example.location_where.api
 
 import com.example.location_where.data.*
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.Response
-import retrofit2.http.Body
-import retrofit2.http.GET
-import retrofit2.http.POST
+import retrofit2.http.*
 
 interface ApiService {
 
@@ -21,20 +21,38 @@ interface ApiService {
     suspend fun reportSimChange(@Body body: SimAlert): Response<ApiResponse<Unit>>
 
     @POST("api/v1/calls/log")
-    suspend fun uploadCallLog(@Body body: CallLogRequest): Response<ApiResponse<Unit>>
+    suspend fun uploadCallLog(@Body body: CallLogRequest): Response<ApiResponse<CallLogResponse>>
 
-    @POST("api/v1/device/commands/pending")
+    @Multipart
+    @POST("api/v1/calls/upload-recording")
+    suspend fun uploadCallRecording(
+        @Part recording: MultipartBody.Part,
+        @Part("callLogId") callLogId: RequestBody,
+        @Part("checksum") checksum: RequestBody
+    ): Response<ApiResponse<Unit>>
+
+    @GET("api/v1/device/commands/pending")
     suspend fun getPendingCommands(): Response<ApiResponse<List<Command>>>
 
     @POST("api/v1/device/commands/executed")
     suspend fun markCommandExecuted(@Body body: CommandExecutionRequest): Response<ApiResponse<Unit>>
 
-    @GET("api/v1/geofence")
+    @POST("api/v1/device/register")
+    suspend fun registerDevice(@Body body: DeviceRegisterRequest): Response<ApiResponse<Unit>>
+
+    @GET("api/v1/location/geofence")
     suspend fun getGeofences(): Response<ApiResponse<List<GeofenceData>>>
 
-    @POST("api/v1/geofence/breach")
+    @POST("api/v1/location/geofence/breach")
     suspend fun reportGeofenceBreach(@Body body: GeofenceBreachRequest): Response<ApiResponse<Unit>>
+
+    @POST("api/v1/employees/consent")
+    suspend fun submitConsent(@Body body: ConsentRequest): Response<ApiResponse<Unit>>
 }
+
+data class ConsentRequest(val consentSigned: Boolean, val consentDate: String)
+
+data class CallLogResponse(val id: String)
 
 data class GeofenceBreachRequest(
     val geofenceId: String,

@@ -26,16 +26,26 @@ class CommandWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
+            Log.d("CommandWorker", "Polling for pending commands")
             val response = apiService.getPendingCommands()
             if (response.isSuccessful) {
                 val commands = response.body()?.data ?: emptyList()
+                Log.d("CommandWorker", "Fetched ${commands.size} pending commands")
                 for (command in commands) {
+                    Log.d("CommandWorker", "Executing ${command.commandType} command ${command.id}")
                     executeCommand(command)
-                    apiService.markCommandExecuted(CommandExecutionRequest(command.id))
+                    val executionResponse = apiService.markCommandExecuted(CommandExecutionRequest(command.id))
+                    Log.d(
+                        "CommandWorker",
+                        "Mark executed for ${command.id}: ${executionResponse.code()} ${executionResponse.isSuccessful}"
+                    )
                 }
+            } else {
+                Log.e("CommandWorker", "Pending commands request failed: ${response.code()} ${response.message()}")
             }
             Result.success()
         } catch (e: Exception) {
+            Log.e("CommandWorker", "Command polling failed", e)
             Result.retry()
         }
     }

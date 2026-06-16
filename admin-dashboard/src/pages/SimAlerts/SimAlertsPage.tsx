@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Tag, Card, Modal, Input, message } from 'antd';
-import { SafetyOutlined, LockOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { SafetyOutlined, LockOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../services/api';
 

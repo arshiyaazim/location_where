@@ -1,15 +1,91 @@
+# =============================================
+# LocationWhere — Comprehensive .gitignore
+# =============================================
+
+# =====================
+# Android / Gradle
+# =====================
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
+*.hprof
+.gradle/
+.gradle-home/
+build/
 /captures
-.externalNativeBuild
-.cxx
+.externalNativeBuild/
+.cxx/
 local.properties
+.kotlin/
+
+# =====================
+# Android Studio / IntelliJ IDEA
+# =====================
+.idea/
+
+# =====================
+# Firebase & Service Account Keys (SECRETS!)
+# =====================
+google-services.json
+*-firebase-adminsdk-*.json
+firebase-adminsdk-*.json
+serviceAccount*.json
+*-service-account*.json
+firebase-debug.log
+firebase-debug.*.log
+.firebaserc
+firebase.json
+
+# =====================
+# Backend — Environment & Secrets
+# =====================
+backend/.env
+backend/.env.local
+backend/.env.production
+backend/.env.staging
+
+# Backend — node_modules & build output
+backend/node_modules/
+backend/dist/
+
+# =====================
+# Admin Dashboard — node_modules & build output
+# =====================
+admin-dashboard/node_modules/
+admin-dashboard/dist/
+
+# =====================
+# Generic Node.js
+# =====================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# =====================
+# IDE / Editor
+# =====================
+.vscode/
+*.swp
+*.swo
+*~
+
+# =====================
+# OS Files
+# =====================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =====================
+# Logs
+# =====================
+*.log
+
+# =====================
+# Gemini / AI Agent artifacts (local-only)
+# =====================
+.agents/
+skills-lock.json

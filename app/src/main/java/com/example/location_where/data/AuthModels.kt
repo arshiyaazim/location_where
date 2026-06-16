@@ -46,7 +46,8 @@ data class LocationUpdate(
     val latitude: Double,
     val longitude: Double,
     val accuracy: Float,
-    val batteryLevel: Int
+    val batteryLevel: Int,
+    val address: String? = null
 )
 
 data class SimAlert(

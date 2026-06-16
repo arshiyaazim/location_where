@@ -1,18 +1,25 @@
 package com.example.location_where.services
 
-import android.app.Service
+import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
-import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.example.location_where.GeofenceBroadcastReceiver
+import com.example.location_where.MainActivity
+import com.example.location_where.R
 import com.example.location_where.api.ApiService
 import com.example.location_where.api.CallLogRequest
 import com.example.location_where.utils.EncryptionUtils
-import com.example.location_where.utils.TokenManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,15 +32,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
+import android.Manifest
 
 @AndroidEntryPoint
 class CallRecordingService : Service() {
 
     @Inject
     lateinit var apiService: ApiService
-
-    @Inject
-    lateinit var tokenManager: TokenManager
 
     private var mediaRecorder: MediaRecorder? = null
     private var isRecording = false
@@ -43,34 +48,81 @@ class CallRecordingService : Service() {
     private var callType: String = "UNKNOWN"
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private lateinit var telephonyManager: TelephonyManager
+
+    companion object {
+        private const val NOTIFICATION_ID = 67890
+        private const val CHANNEL_ID = "call_recording_tracking"
+    }
 
     override fun onCreate() {
         super.onCreate()
-        val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-        telephonyManager.listen(callStateListener, PhoneStateListener.LISTEN_CALL_STATE)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopSelf()
+            return
+        }
+
+        createNotificationChannel()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+        } catch (e: Exception) {
+            Log.e("CallRecordService", "Failed to start foreground", e)
+            stopSelf()
+            return
+        }
+
+        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            registerTelephonyCallback()
+        } else {
+            @Suppress("DEPRECATION")
+            telephonyManager.listen(object : android.telephony.PhoneStateListener() {
+                override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                    handleCallState(state, phoneNumber)
+                }
+            }, android.telephony.PhoneStateListener.LISTEN_CALL_STATE)
+        }
     }
 
-    private val callStateListener = object : PhoneStateListener() {
-        override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-            when (state) {
-                TelephonyManager.CALL_STATE_OFFHOOK -> {
-                    // Call started (Outgoing or Answered)
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun registerTelephonyCallback() {
+        telephonyManager.registerTelephonyCallback(mainExecutor, object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+            override fun onCallStateChanged(state: Int) {
+                handleCallState(state, null)
+            }
+        })
+    }
+
+    private fun handleCallState(state: Int, phoneNumber: String?) {
+        when (state) {
+            TelephonyManager.CALL_STATE_OFFHOOK -> {
+                if (!isRecording) {
                     currentPhoneNumber = phoneNumber
                     callStartTime = System.currentTimeMillis()
                     startRecording()
                 }
-                TelephonyManager.CALL_STATE_IDLE -> {
-                    // Call ended
-                    if (isRecording) {
-                        stopRecording()
-                        saveAndUploadCall(phoneNumber)
-                    }
+            }
+            TelephonyManager.CALL_STATE_IDLE -> {
+                if (isRecording) {
+                    stopRecording()
+                    saveAndUploadCall(phoneNumber)
                 }
-                TelephonyManager.CALL_STATE_RINGING -> {
-                    // Incoming call
-                    currentPhoneNumber = phoneNumber
-                    callType = "INCOMING"
-                }
+            }
+            TelephonyManager.CALL_STATE_RINGING -> {
+                currentPhoneNumber = phoneNumber
+                callType = "INCOMING"
             }
         }
     }
@@ -81,6 +133,7 @@ class CallRecordingService : Service() {
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(this)
             } else {
+                @Suppress("DEPRECATION")
                 MediaRecorder()
             }
 
@@ -142,6 +195,7 @@ class CallRecordingService : Service() {
     }
 
     private suspend fun uploadRecording(callLogId: String, file: File) {
+        if (!file.exists()) return
         val encryptedFile = File(file.parent, file.name + ".enc")
         EncryptionUtils.encryptFile(file, encryptedFile)
         val checksum = EncryptionUtils.calculateChecksum(encryptedFile)
@@ -163,11 +217,32 @@ class CallRecordingService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onDestroy() {
-        super.onDestroy()
-        val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-        telephonyManager.listen(callStateListener, PhoneStateListener.LISTEN_NONE)
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "Call Monitoring Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(serviceChannel)
+        }
     }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Call Monitoring Active")
+            .setContentText("Policy compliance: Monitoring calls.")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }

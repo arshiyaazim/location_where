@@ -3,15 +3,24 @@ package com.example.location_where
 import android.content.Context
 import android.os.Build
 import android.telephony.SubscriptionManager
-import android.telephony.TelephonyManager
 import android.util.Log
+import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.example.location_where.api.DeviceInfoMap
-import com.example.location_where.api.RetrofitClient
-import com.example.location_where.api.SimAlert
+import com.example.location_where.api.ApiService
+import com.example.location_where.data.DeviceInfoMap
+import com.example.location_where.data.SimAlert
+import com.example.location_where.utils.TokenManager
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 
-class SimCheckWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+@HiltWorker
+class SimCheckWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted params: WorkerParameters,
+    private val apiService: ApiService,
+    private val tokenManager: TokenManager
+) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         val subscriptionManager = applicationContext.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
@@ -21,16 +30,13 @@ class SimCheckWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (activeSubscriptions != null) {
                 for (info in activeSubscriptions) {
                     val currentIccId = info.iccId
-                    val currentImsi = "" // IMSI is harder to get on newer Android, using ICCID for logic
                     
-                    // Logic: Compare currentIccId with authorized ICCID from SharedPreferences
                     val sharedPrefs = applicationContext.getSharedPreferences("MonitoringPrefs", Context.MODE_PRIVATE)
                     val savedIccId = sharedPrefs.getString("authorized_iccid", null)
 
                     if (savedIccId != null && savedIccId != currentIccId) {
                         sendSimAlert(savedIccId, currentIccId, null, info.subscriptionId.toString())
                     } else if (savedIccId == null) {
-                        // First run: Save current as authorized
                         sharedPrefs.edit().putString("authorized_iccid", currentIccId).apply()
                     }
                 }
@@ -55,8 +61,8 @@ class SimCheckWorker(context: Context, params: WorkerParameters) : CoroutineWork
         )
 
         try {
-            val token = "Bearer YOUR_MOCK_TOKEN"
-            val response = RetrofitClient.instance.sendSimAlert(token, alert)
+            tokenManager.getAccessToken() ?: return
+            val response = apiService.reportSimChange(alert) // AuthInterceptor will add the token
             if (response.isSuccessful) {
                 Log.d("SimCheckWorker", "SIM alert sent")
             }

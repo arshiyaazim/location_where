@@ -2,6 +2,7 @@ import prisma from '../../config/database';
 import s3Client from '../../config/aws';
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { verifyChecksum } from '../../utils/encryption';
 
 export const logCall = async (employeeId: string, callData: any) => {
   return prisma.callLog.create({
@@ -14,7 +15,11 @@ export const logCall = async (employeeId: string, callData: any) => {
   });
 };
 
-export const uploadRecording = async (callLogId: string, file: Express.Multer.File) => {
+export const uploadRecording = async (callLogId: string, file: Express.Multer.File, checksum: string) => {
+  if (!verifyChecksum(file.buffer, checksum)) {
+    throw new Error('Recording checksum verification failed');
+  }
+
   const key = `recordings/${callLogId}_${Date.now()}.enc`;
 
   await s3Client.send(new PutObjectCommand({

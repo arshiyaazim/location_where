@@ -13,11 +13,21 @@ export const login = async (req: Request, res: Response) => {
 
 export const initiateMobileLogin = async (req: Request, res: Response) => {
   try {
-    const { employeeCode } = req.body;
-    const result = await authService.initiateEmployeeLogin(employeeCode);
+    const { employeeCode, password, deviceId, fcmToken } = req.body;
+    const result = await authService.employeeMobileLogin(employeeCode, password, deviceId, fcmToken);
     res.json({ success: true, data: result });
   } catch (error: any) {
-    res.status(400).json({ success: false, error: error.message });
+    res.status(401).json({ success: false, error: error.message, code: 'AUTH_FAILED' });
+  }
+};
+
+export const refresh = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+    const result = await authService.refreshAccessToken(refreshToken);
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    res.status(401).json({ success: false, error: error.message, code: 'TOKEN_INVALID' });
   }
 };
 

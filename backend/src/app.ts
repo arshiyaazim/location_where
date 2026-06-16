@@ -8,6 +8,7 @@ dotenv.config();
 
 import authRoutes from './modules/auth/auth.routes';
 import employeeRoutes from './modules/employee/employee.routes';
+import gatewayRoutes from './modules/gateway/gateway.routes';
 import locationRoutes from './modules/location/location.routes';
 import simRoutes from './modules/sim/sim.routes';
 import callRoutes from './modules/call/call.routes';
@@ -18,17 +19,22 @@ import reportRoutes from './modules/report/report.routes';
 import { connectRedis } from './config/redis';
 import logger from './utils/logger';
 import { apiLimiter } from './middleware/rateLimit.middleware';
+import { isFirebaseAdminInitialized } from './config/firebase';
 
 const app = express();
+
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(apiLimiter);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/employees', employeeRoutes);
+app.use('/api/v1/gateway', gatewayRoutes);
 app.use('/api/v1/location', locationRoutes);
 app.use('/api/v1/sim', simRoutes);
 app.use('/api/v1/calls', callRoutes);
@@ -37,7 +43,11 @@ app.use('/api/v1/alerts', alertRoutes);
 app.use('/api/v1/reports', reportRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'UP', timestamp: new Date() });
+  res.json({
+    status: 'UP',
+    timestamp: new Date(),
+    firebaseAdminInitialized: isFirebaseAdminInitialized()
+  });
 });
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

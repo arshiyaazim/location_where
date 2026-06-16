@@ -8,5 +8,7 @@ const router = Router();
 router.post('/update', authEmployee, locationLimiter, locationController.updateLocation);
 router.get('/live', authAdmin, locationController.getLive);
 router.get('/:employeeId/history', authAdmin, locationController.getEmployeeHistory);
+router.get('/geofence', authEmployee, locationController.listGeofences);
+router.post('/geofence/breach', authEmployee, locationController.breachGeofence);
 
 export default router;

@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { AuthRequest } from './auth.middleware';
 
 export const loginLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -30,5 +31,5 @@ export const locationLimiter = rateLimit({
     error: 'Location update rate limit exceeded',
     code: 'TOO_MANY_REQUESTS'
   },
-  keyGenerator: (req) => req.user?.id || req.ip
+  keyGenerator: (req) => (req as AuthRequest).user?.id || req.ip
 });

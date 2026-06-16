@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
@@ -11,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.location_where.GeofenceBroadcastReceiver
 import com.example.location_where.MainActivity
 import com.example.location_where.R
@@ -20,6 +23,7 @@ import com.google.android.gms.location.*
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
+import android.Manifest
 
 @AndroidEntryPoint
 class LocationService : Service() {
@@ -39,7 +43,10 @@ class LocationService : Service() {
         private const val NOTIFICATION_ID = 12345
         private const val CHANNEL_ID = "location_tracking"
         private const val ALERT_CHANNEL_ID = "geofence_alert"
-        private var UPDATE_INTERVAL_MS: Long = 30000 
+        private const val NORMAL_UPDATE_INTERVAL_MS: Long = 60_000
+        private const val LOW_BATTERY_UPDATE_INTERVAL_MS: Long = 120_000
+        private const val MIN_UPDATE_DISTANCE_METERS = 25f
+        private var UPDATE_INTERVAL_MS: Long = NORMAL_UPDATE_INTERVAL_MS
     }
 
     override fun onCreate() {
@@ -62,7 +69,27 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+        } catch (e: Exception) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e is ForegroundServiceStartNotAllowedException) {
+                Log.e("LocationService", "FGS start not allowed", e)
+            } else {
+                Log.e("LocationService", "Failed to start foreground", e)
+            }
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         adjustIntervalBasedOnBattery()
         requestLocationUpdates()
         return START_STICKY
@@ -73,7 +100,9 @@ class LocationService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
 
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
-            .setMinUpdateIntervalMillis(UPDATE_INTERVAL_MS / 2)
+            .setMinUpdateIntervalMillis(UPDATE_INTERVAL_MS)
+            .setMinUpdateDistanceMeters(MIN_UPDATE_DISTANCE_METERS)
+            .setWaitForAccurateLocation(false)
             .build()
 
         fusedLocationClient.requestLocationUpdates(
@@ -94,8 +123,8 @@ class LocationService : Service() {
             )
             updatePersistentNotification(batteryLevel)
             
-            if (batteryLevel < 30 && UPDATE_INTERVAL_MS == 30000L) {
-                UPDATE_INTERVAL_MS = 60000L
+            if (batteryLevel < 30 && UPDATE_INTERVAL_MS == NORMAL_UPDATE_INTERVAL_MS) {
+                UPDATE_INTERVAL_MS = LOW_BATTERY_UPDATE_INTERVAL_MS
                 requestLocationUpdates()
             }
         }
@@ -148,7 +177,7 @@ class LocationService : Service() {
 
     private fun adjustIntervalBasedOnBattery() {
         val level = getBatteryLevel()
-        UPDATE_INTERVAL_MS = if (level < 30) 60000L else 30000L
+        UPDATE_INTERVAL_MS = if (level < 30) LOW_BATTERY_UPDATE_INTERVAL_MS else NORMAL_UPDATE_INTERVAL_MS
     }
 
     private fun createNotificationChannels() {

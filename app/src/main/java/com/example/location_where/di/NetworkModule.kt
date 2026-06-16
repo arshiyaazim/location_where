@@ -2,6 +2,7 @@ package com.example.location_where.di
 
 import com.example.location_where.api.ApiService
 import com.example.location_where.api.AuthInterceptor
+import com.example.location_where.BuildConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,25 +26,29 @@ object NetworkModule {
             level = HttpLoggingInterceptor.Level.BODY
         }
 
-        // SSL Pinning
-        val certificatePinner = CertificatePinner.Builder()
-            .add("yourdomain.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-            .build()
-
-        return OkHttpClient.Builder()
-            .addInterceptor(logging)
+        val clientBuilder = OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
-            .certificatePinner(certificatePinner)
+            .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
-            .build()
+
+        val certHost = BuildConfig.API_CERT_HOST
+        val certSha256 = BuildConfig.API_CERT_SHA256
+        if (certHost.isNotBlank() && certSha256.isNotBlank()) {
+            val certificatePinner = CertificatePinner.Builder()
+                .add(certHost, certSha256)
+                .build()
+            clientBuilder.certificatePinner(certificatePinner)
+        }
+
+        return clientBuilder.build()
     }
 
     @Provides
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit {
         return Retrofit.Builder()
-            .baseUrl("https://your-api-url.com/")
+            .baseUrl(BuildConfig.API_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

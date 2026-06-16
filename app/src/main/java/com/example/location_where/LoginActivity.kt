@@ -1,6 +1,7 @@
 package com.example.location_where
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -48,7 +49,7 @@ class LoginActivity : AppCompatActivity() {
                 }
                 is LoginUiState.Success -> {
                     binding.loading.visibility = View.GONE
-                    startActivity(Intent(this, MainActivity::class.java))
+                    routeAfterLogin()
                     finish()
                 }
                 is LoginUiState.Error -> {
@@ -65,5 +66,11 @@ class LoginActivity : AppCompatActivity() {
         if (rootBeer.isRooted) {
             Toast.makeText(this, "সতর্কবার্তা: ডিভাইসটি রুটেড! এটি কোম্পানির নীতির পরিপন্থী।", Toast.LENGTH_LONG).show()
         }
+    }
+    private fun routeAfterLogin() {
+        val sharedPrefs = getSharedPreferences("MonitoringPrefs", Context.MODE_PRIVATE)
+        val consentSigned = sharedPrefs.getBoolean("consent_signed", false)
+        val nextActivity = if (consentSigned) MainActivity::class.java else ConsentActivity::class.java
+        startActivity(Intent(this, nextActivity))
     }
 }

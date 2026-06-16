@@ -2,6 +2,7 @@ package com.example.location_where.api
 
 import com.example.location_where.data.RefreshRequest
 import com.example.location_where.utils.TokenManager
+import dagger.Lazy
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -25,29 +26,37 @@ class AuthInterceptor @Inject constructor(
         val response = chain.proceed(requestWithToken)
 
         if (response.code == 401) {
-            response.close()
             val refreshToken = runBlocking { tokenManager.getRefreshToken() }
             if (refreshToken != null) {
-                val newAccessToken = runBlocking {
-                    val refreshResponse = apiService.value.refreshToken(RefreshRequest(refreshToken))
-                    if (refreshResponse.isSuccessful) {
-                        refreshResponse.body()?.data?.accessToken?.also {
-                            tokenManager.saveTokens(it, refreshToken)
-                        }
+                synchronized(this) {
+                    val currentToken = runBlocking { tokenManager.getAccessToken() }
+                    // If token changed while waiting, just retry with new token
+                    val nextToken = if (currentToken != accessToken) {
+                        currentToken
                     } else {
-                        null
+                        runBlocking {
+                            val refreshResponse = apiService.get().refreshToken(RefreshRequest(refreshToken))
+                            if (refreshResponse.isSuccessful) {
+                                val refreshedToken = refreshResponse.body()?.data?.accessToken
+                                if (refreshedToken != null) {
+                                    tokenManager.saveTokens(refreshedToken, refreshToken)
+                                }
+                                refreshedToken
+                            } else {
+                                null
+                            }
+                        }
+                    }
+
+                    if (nextToken != null) {
+                        response.close()
+                        val retryRequest = originalRequest.newBuilder()
+                            .header("Authorization", "Bearer $nextToken")
+                            .build()
+                        return chain.proceed(retryRequest)
                     }
                 }
-
-                if (newAccessToken != null) {
-                    val retryRequest = originalRequest.newBuilder()
-                        .header("Authorization", "Bearer $newAccessToken")
-                        .build()
-                    return chain.proceed(retryRequest)
-                }
             }
-            // If refresh fails or no refresh token, tokenManager.clearTokens() could be called here
-            // and app should redirect to login.
         }
 
         return response

@@ -5,11 +5,16 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.example.location_where.api.ApiService
+import com.example.location_where.api.ConsentRequest
 import com.example.location_where.databinding.ActivityConsentBinding
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -38,11 +43,16 @@ class ConsentActivity : AppCompatActivity() {
         val sharedPrefs = getSharedPreferences("MonitoringPrefs", Context.MODE_PRIVATE)
         sharedPrefs.edit().putBoolean("consent_signed", true).apply()
 
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        val date = sdf.format(Date())
+
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Assuming employee ID is available in TokenManager or similar
-                // apiService.submitConsent(...) 
-            } catch (e: Exception) { }
+                apiService.submitConsent(ConsentRequest(true, date))
+            } catch (e: Exception) {
+                // Background submission failed, handled by sync logic if implemented
+            }
         }
 
         startActivity(Intent(this, MainActivity::class.java))

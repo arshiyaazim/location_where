@@ -1,6 +1,7 @@
 package com.example.location_where.utils
 
 import android.content.Context
+import android.util.Base64
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -8,7 +9,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
-import java.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,7 +46,7 @@ class TokenManager @Inject constructor(@ApplicationContext private val context: 
         return try {
             val parts = token.split(".")
             if (parts.size != 3) return true
-            val payload = String(Base64.getUrlDecoder().decode(parts[1]))
+            val payload = String(Base64.decode(parts[1], Base64.URL_SAFE))
             val json = JSONObject(payload)
             val exp = json.getLong("exp")
             val currentTime = System.currentTimeMillis() / 1000

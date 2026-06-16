@@ -1,8 +1,6 @@
 package com.example.location_where.ui
 
-import android.provider.Settings
 import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableCornerSizes
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

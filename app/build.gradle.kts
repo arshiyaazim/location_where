@@ -1,9 +1,18 @@
 plugins {
-    id("com.android.application")
-    // id("org.jetbrains.kotlin.android")
-    id("com.google.devtools.ksp")
-    id("com.google.dagger.hilt.android")
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.kotlinAndroid)
+    alias(libs.plugins.googleKsp)
+    alias(libs.plugins.googleHilt)
+    id("com.google.gms.google-services")
 }
+
+fun String.asBuildConfigString(): String = "\"${replace("\\", "\\\\")}\""
+
+val apiBaseUrl = (project.findProperty("API_BASE_URL") as String?) ?: "https://locationwhere.iamazim.com/"
+val apiCertHost = (project.findProperty("API_CERT_HOST") as String?) ?: ""
+val apiCertSha256 = (project.findProperty("API_CERT_SHA256") as String?) ?: ""
+val encryptionPassphrase = (project.findProperty("ENCRYPTION_PASSPHRASE") as String?) ?: "secure_recording_passphrase_2025"
+val encryptionIv = (project.findProperty("ENCRYPTION_IV") as String?) ?: "1234567890123456"
 
 android {
     namespace = "com.example.location_where"
@@ -17,6 +26,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "API_BASE_URL", apiBaseUrl.asBuildConfigString())
+        buildConfigField("String", "API_CERT_HOST", apiCertHost.asBuildConfigString())
+        buildConfigField("String", "API_CERT_SHA256", apiCertSha256.asBuildConfigString())
+        buildConfigField("String", "ENCRYPTION_PASSPHRASE", encryptionPassphrase.asBuildConfigString())
+        buildConfigField("String", "ENCRYPTION_IV", encryptionIv.asBuildConfigString())
     }
 
     buildTypes {
@@ -29,11 +44,15 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
@@ -51,6 +70,10 @@ dependencies {
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     // Hilt
     implementation(libs.hilt.android)
