@@ -7,9 +7,13 @@ exports.verifyOTP = exports.employeeMobileLogin = exports.initiateEmployeeLogin 
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = __importDefault(require("../../config/database"));
-const sms_1 = require("../../utils/sms");
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'access_secret';
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh_secret';
+const redis_1 = __importDefault(require("../../config/redis"));
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+if (!ACCESS_SECRET)
+    throw new Error('JWT_ACCESS_SECRET is not set');
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+if (!REFRESH_SECRET)
+    throw new Error('JWT_REFRESH_SECRET is not set');
 const generateTokens = (payload) => {
     const accessToken = jsonwebtoken_1.default.sign(payload, ACCESS_SECRET, { expiresIn: '15m' });
     const refreshToken = jsonwebtoken_1.default.sign(payload, REFRESH_SECRET, { expiresIn: '7d' });
@@ -54,10 +58,7 @@ const initiateEmployeeLogin = async (employeeCode) => {
     const employee = await database_1.default.employee.findUnique({ where: { employeeCode } });
     if (!employee || !employee.isActive)
         throw new Error('Employee not found or inactive');
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    // In a real app, store OTP in Redis with expiry
-    await (0, sms_1.sendSMS)(employee.phone, `Your monitoring app verification code is: ${otp}`);
-    return { message: 'OTP sent to registered phone number' };
+    throw new Error('Direct OTP SMS delivery is disabled; use employee-code/password login or smsgateway-mediated delivery.');
 };
 exports.initiateEmployeeLogin = initiateEmployeeLogin;
 const employeeMobileLogin = async (employeeCode, password, deviceId, fcmToken) => {
@@ -90,10 +91,11 @@ const verifyOTP = async (employeeCode, otp, deviceId) => {
     const employee = await database_1.default.employee.findUnique({ where: { employeeCode } });
     if (!employee)
         throw new Error('Invalid employee code');
-    // Verify logic (normally against Redis)
-    if (otp !== "123456") { // Hardcoded for demo/testing
-        // throw new Error('Invalid OTP');
+    const storedOtp = await redis_1.default.get(`otp:${employeeCode}`);
+    if (!storedOtp || storedOtp !== otp) {
+        throw new Error('Invalid or expired OTP');
     }
+    await redis_1.default.del(`otp:${employeeCode}`);
     await database_1.default.employee.update({
         where: { id: employee.id },
         data: { deviceId }

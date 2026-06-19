@@ -6,10 +6,90 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateConsent = exports.handleOnboardingSms = exports.processSmsOnboarding = exports.regeneratePassword = exports.changePassword = exports.deleteEmployee = exports.softDeleteEmployee = exports.updateEmployee = exports.createEmployee = exports.getAllEmployees = exports.listEmployees = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = __importDefault(require("../../config/database"));
-const sms_1 = require("../../utils/sms");
+const logger_1 = __importDefault(require("../../utils/logger"));
 const employee_utils_1 = require("./employee.utils");
 const APK_DOWNLOAD_URL = process.env.APK_DOWNLOAD_URL || 'https://locationwhere.iamazim.com/downloads/app-debug.apk';
-const ADMIN_ONBOARDING_PHONE = process.env.ADMIN_ONBOARDING_PHONE || '01880446111';
+const ADMIN_ONBOARDING_PHONE = process.env.ADMIN_ONBOARDING_PHONE || '01958122300';
+const FAZLE_CORE_SYNC_ENABLED = (process.env.FAZLE_CORE_SYNC_ENABLED || 'true').toLowerCase() === 'true';
+const FAZLE_CORE_TABLE = process.env.FAZLE_CORE_EMPLOYEE_TABLE || 'wbom_employees';
+let fazleColumnsCache = null;
+const getFazleCoreColumns = async () => {
+    if (fazleColumnsCache) {
+        return fazleColumnsCache;
+    }
+    const columns = await database_1.default.$queryRaw `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = ${FAZLE_CORE_TABLE}
+  `;
+    fazleColumnsCache = new Set(columns.map((row) => row.column_name));
+    return fazleColumnsCache;
+};
+const syncEmployeeToFazleCore = async (employee) => {
+    if (!FAZLE_CORE_SYNC_ENABLED) {
+        return;
+    }
+    try {
+        const columns = await getFazleCoreColumns();
+        if (!columns.size) {
+            logger_1.default.warn('fazle_core_sync_skipped_no_table', { table: FAZLE_CORE_TABLE });
+            return;
+        }
+        if (!columns.has('employee_mobile') || !columns.has('employee_name')) {
+            logger_1.default.warn('fazle_core_sync_skipped_missing_columns', {
+                table: FAZLE_CORE_TABLE,
+                employee_mobile: columns.has('employee_mobile'),
+                employee_name: columns.has('employee_name')
+            });
+            return;
+        }
+        const existing = await database_1.default.$queryRawUnsafe(`SELECT employee_mobile FROM ${FAZLE_CORE_TABLE} WHERE employee_mobile = $1 LIMIT 1`, employee.phone);
+        if (existing.length > 0) {
+            const updateSql = columns.has('updated_at')
+                ? `UPDATE ${FAZLE_CORE_TABLE} SET employee_name = $1, updated_at = NOW() WHERE employee_mobile = $2`
+                : `UPDATE ${FAZLE_CORE_TABLE} SET employee_name = $1 WHERE employee_mobile = $2`;
+            await database_1.default.$executeRawUnsafe(updateSql, employee.fullName, employee.phone);
+            return;
+        }
+        const insertColumns = [];
+        const insertValues = [];
+        const args = [];
+        const addArg = (value) => {
+            args.push(value);
+            return `$${args.length}`;
+        };
+        insertColumns.push('employee_mobile');
+        insertValues.push(addArg(employee.phone));
+        insertColumns.push('employee_name');
+        insertValues.push(addArg(employee.fullName));
+        if (columns.has('status')) {
+            insertColumns.push('status');
+            insertValues.push(addArg('ACTIVE'));
+        }
+        if (columns.has('joining_date')) {
+            insertColumns.push('joining_date');
+            insertValues.push('CURRENT_DATE');
+        }
+        if (columns.has('created_at')) {
+            insertColumns.push('created_at');
+            insertValues.push('NOW()');
+        }
+        if (columns.has('updated_at')) {
+            insertColumns.push('updated_at');
+            insertValues.push('NOW()');
+        }
+        const insertSql = `INSERT INTO ${FAZLE_CORE_TABLE} (${insertColumns.join(', ')}) VALUES (${insertValues.join(', ')})`;
+        await database_1.default.$executeRawUnsafe(insertSql, ...args);
+    }
+    catch (error) {
+        logger_1.default.warn('fazle_core_sync_failed', {
+            table: FAZLE_CORE_TABLE,
+            phone: employee.phone,
+            error: error?.message || String(error)
+        });
+    }
+};
 const withDeviceName = (deviceInfo) => {
     if (!deviceInfo) {
         return null;
@@ -50,6 +130,10 @@ const createEmployeeRecord = async (employeeData) => {
                     isActive: employeeData.isActive ?? true
                 },
                 include: { deviceInfo: true }
+            });
+            await syncEmployeeToFazleCore({
+                fullName: employee.fullName,
+                phone: employee.phone
             });
             return {
                 employee: sanitizeEmployee(employee),
@@ -201,11 +285,23 @@ const processSmsOnboarding = async (payload) => {
     const sender = (0, employee_utils_1.normalizePhoneNumber)(payload.sender);
     const recipient = (0, employee_utils_1.normalizePhoneNumber)(payload.recipient);
     const expectedRecipient = (0, employee_utils_1.normalizePhoneNumber)(ADMIN_ONBOARDING_PHONE);
+    const replyTo = sender;
     if (recipient !== expectedRecipient) {
-        return { status: 'ignored' };
+        return {
+            status: 'ignored',
+            replyTo,
+            replyMessage: 'Onboarding SMS was not addressed to the configured gateway number.'
+        };
     }
     try {
         const { phone, fullName } = (0, employee_utils_1.parseOnboardingSms)(payload.body);
+        if (sender !== phone) {
+            return {
+                status: 'sender_mismatch',
+                replyTo,
+                replyMessage: 'The mobile number in the ID SMS must match the sender number.'
+            };
+        }
         const existingEmployee = await database_1.default.employee.findUnique({
             where: { phone },
             select: { employeeCode: true }
@@ -213,7 +309,9 @@ const processSmsOnboarding = async (payload) => {
         if (existingEmployee) {
             return {
                 status: 'duplicate',
-                employeeCode: existingEmployee.employeeCode
+                employeeCode: existingEmployee.employeeCode,
+                replyTo,
+                replyMessage: `This number is already registered as ${existingEmployee.employeeCode}.`
             };
         }
         const result = await createEmployeeRecord({
@@ -222,15 +320,20 @@ const processSmsOnboarding = async (payload) => {
             registrationStatus: 'UNREGISTERED',
             isActive: true
         });
-        await (0, sms_1.sendSMS)(sender, `Welcome ${fullName}! ID: ${result.employee.employeeCode} Pass: ${result.generatedPassword} APK: ${APK_DOWNLOAD_URL}`);
         return {
             status: 'created',
-            employeeCode: result.employee.employeeCode
+            employeeCode: result.employee.employeeCode,
+            replyTo,
+            replyMessage: `Welcome ${fullName}!\nID: ${result.employee.employeeCode}\nPass: ${result.generatedPassword}\nAPK: ${APK_DOWNLOAD_URL}`
         };
     }
     catch (error) {
-        if (error.message === 'SMS body must match: ID: <mobile_number> <employee_name>') {
-            return { status: 'invalid_format' };
+        if (error.message === 'SMS body must include ID and a mobile number') {
+            return {
+                status: 'invalid_format',
+                replyTo,
+                replyMessage: 'Invalid format. Please send: ID: <mobile_number> <employee_name>'
+            };
         }
         throw error;
     }

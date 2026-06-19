@@ -2,7 +2,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../../config/database';
 import redisClient from '../../config/redis';
-import { sendSMS } from '../../utils/sms';
 
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 if (!ACCESS_SECRET) throw new Error('JWT_ACCESS_SECRET is not set');
@@ -55,11 +54,7 @@ export const initiateEmployeeLogin = async (employeeCode: string) => {
   const employee = await prisma.employee.findUnique({ where: { employeeCode } });
   if (!employee || !employee.isActive) throw new Error('Employee not found or inactive');
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-  await redisClient.set(`otp:${employeeCode}`, otp, { EX: 300 });
-  await sendSMS(employee.phone, `Your monitoring app verification code is: ${otp}`);
-  return { message: 'OTP sent to registered phone number' };
+  throw new Error('Direct OTP SMS delivery is disabled; use employee-code/password login or smsgateway-mediated delivery.');
 };
 
 export const employeeMobileLogin = async (

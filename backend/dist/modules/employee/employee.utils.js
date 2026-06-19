@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseOnboardingSms = exports.generateNextEmployeeCode = exports.generatePassword = exports.buildPlaceholderEmail = exports.maskPhoneNumber = exports.normalizeSmsNumber = exports.normalizePhoneNumber = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/i;
+const BANGLADESH_MOBILE_PATTERN = /(?:\+?88)?01\d(?:[\s-]?\d){8}/;
 const normalizePhoneNumber = (value) => {
     const digits = value.replace(/\D/g, '');
     if (digits.startsWith('880') && digits.length === 13) {
@@ -52,13 +53,24 @@ const generateNextEmployeeCode = async (prisma) => {
 };
 exports.generateNextEmployeeCode = generateNextEmployeeCode;
 const parseOnboardingSms = (rawMessage) => {
-    const match = rawMessage.trim().match(/^ID:\s*(\+?[\d\s-]+)\s+(.+)$/i);
-    if (!match) {
-        throw new Error('SMS body must match: ID: <mobile_number> <employee_name>');
+    const message = rawMessage.trim();
+    const idMatch = message.match(/^I\s*D\s*:?\s*(.+)$/i);
+    if (!idMatch) {
+        throw new Error('SMS body must include ID and a mobile number');
     }
+    const content = idMatch[1].trim();
+    const phoneMatch = content.match(BANGLADESH_MOBILE_PATTERN);
+    if (!phoneMatch) {
+        throw new Error('SMS body must include ID and a mobile number');
+    }
+    const phone = (0, exports.normalizePhoneNumber)(phoneMatch[0]);
+    const fullName = content
+        .replace(phoneMatch[0], ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     return {
-        phone: (0, exports.normalizePhoneNumber)(match[1]),
-        fullName: match[2].trim()
+        phone,
+        fullName: fullName || phone
     };
 };
 exports.parseOnboardingSms = parseOnboardingSms;

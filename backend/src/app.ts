@@ -59,13 +59,14 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
 
 const startServer = async () => {
   try {
     await connectRedis();
-    app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
+    app.listen(PORT, HOST, () => {
+      logger.info(`Server running on port ${PORT} host ${HOST}`);
     });
   } catch (error) {
     logger.error('Failed to start server', error);

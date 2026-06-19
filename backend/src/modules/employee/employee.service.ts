@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../../config/database';
-import { sendSMS } from '../../utils/sms';
+import logger from '../../utils/logger';
 import {
   generateNextEmployeeCode,
   generatePassword,
@@ -11,7 +11,108 @@ import {
 const APK_DOWNLOAD_URL =
   process.env.APK_DOWNLOAD_URL || 'https://locationwhere.iamazim.com/downloads/app-debug.apk';
 const ADMIN_ONBOARDING_PHONE =
-  process.env.ADMIN_ONBOARDING_PHONE || '01880446111';
+  process.env.ADMIN_ONBOARDING_PHONE || '01958122300';
+const FAZLE_CORE_SYNC_ENABLED = (process.env.FAZLE_CORE_SYNC_ENABLED || 'true').toLowerCase() === 'true';
+const FAZLE_CORE_TABLE = process.env.FAZLE_CORE_EMPLOYEE_TABLE || 'wbom_employees';
+
+let fazleColumnsCache: Set<string> | null = null;
+
+const getFazleCoreColumns = async () => {
+  if (fazleColumnsCache) {
+    return fazleColumnsCache;
+  }
+
+  const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = ${FAZLE_CORE_TABLE}
+  `;
+
+  fazleColumnsCache = new Set(columns.map((row) => row.column_name));
+  return fazleColumnsCache;
+};
+
+const syncEmployeeToFazleCore = async (employee: { fullName: string; phone: string }) => {
+  if (!FAZLE_CORE_SYNC_ENABLED) {
+    return;
+  }
+
+  try {
+    const columns = await getFazleCoreColumns();
+    if (!columns.size) {
+      logger.warn('fazle_core_sync_skipped_no_table', { table: FAZLE_CORE_TABLE });
+      return;
+    }
+
+    if (!columns.has('employee_mobile') || !columns.has('employee_name')) {
+      logger.warn('fazle_core_sync_skipped_missing_columns', {
+        table: FAZLE_CORE_TABLE,
+        employee_mobile: columns.has('employee_mobile'),
+        employee_name: columns.has('employee_name')
+      });
+      return;
+    }
+
+    const existing = await prisma.$queryRawUnsafe<Array<{ employee_mobile: string }>>(
+      `SELECT employee_mobile FROM ${FAZLE_CORE_TABLE} WHERE employee_mobile = $1 LIMIT 1`,
+      employee.phone
+    );
+
+    if (existing.length > 0) {
+      const updateSql = columns.has('updated_at')
+        ? `UPDATE ${FAZLE_CORE_TABLE} SET employee_name = $1, updated_at = NOW() WHERE employee_mobile = $2`
+        : `UPDATE ${FAZLE_CORE_TABLE} SET employee_name = $1 WHERE employee_mobile = $2`;
+
+      await prisma.$executeRawUnsafe(updateSql, employee.fullName, employee.phone);
+      return;
+    }
+
+    const insertColumns: string[] = [];
+    const insertValues: string[] = [];
+    const args: Array<string | number> = [];
+
+    const addArg = (value: string | number) => {
+      args.push(value);
+      return `$${args.length}`;
+    };
+
+    insertColumns.push('employee_mobile');
+    insertValues.push(addArg(employee.phone));
+
+    insertColumns.push('employee_name');
+    insertValues.push(addArg(employee.fullName));
+
+    if (columns.has('status')) {
+      insertColumns.push('status');
+      insertValues.push(addArg('ACTIVE'));
+    }
+
+    if (columns.has('joining_date')) {
+      insertColumns.push('joining_date');
+      insertValues.push('CURRENT_DATE');
+    }
+
+    if (columns.has('created_at')) {
+      insertColumns.push('created_at');
+      insertValues.push('NOW()');
+    }
+
+    if (columns.has('updated_at')) {
+      insertColumns.push('updated_at');
+      insertValues.push('NOW()');
+    }
+
+    const insertSql = `INSERT INTO ${FAZLE_CORE_TABLE} (${insertColumns.join(', ')}) VALUES (${insertValues.join(', ')})`;
+    await prisma.$executeRawUnsafe(insertSql, ...args);
+  } catch (error: any) {
+    logger.warn('fazle_core_sync_failed', {
+      table: FAZLE_CORE_TABLE,
+      phone: employee.phone,
+      error: error?.message || String(error)
+    });
+  }
+};
 
 const withDeviceName = (deviceInfo: any) => {
   if (!deviceInfo) {
@@ -66,6 +167,11 @@ const createEmployeeRecord = async (employeeData: {
           isActive: employeeData.isActive ?? true
         },
         include: { deviceInfo: true }
+      });
+
+      await syncEmployeeToFazleCore({
+        fullName: employee.fullName,
+        phone: employee.phone
       });
 
       return {
@@ -257,6 +363,14 @@ export const processSmsOnboarding = async (payload: {
 
   try {
     const { phone, fullName } = parseOnboardingSms(payload.body);
+    if (sender !== phone) {
+      return {
+        status: 'sender_mismatch' as const,
+        replyTo,
+        replyMessage: 'The mobile number in the ID SMS must match the sender number.'
+      };
+    }
+
     const existingEmployee = await prisma.employee.findUnique({
       where: { phone },
       select: { employeeCode: true }
@@ -278,11 +392,6 @@ export const processSmsOnboarding = async (payload: {
       isActive: true
     });
 
-    await sendSMS(
-      sender,
-      `Welcome ${fullName}! ID: ${result.employee.employeeCode} Pass: ${result.generatedPassword} APK: ${APK_DOWNLOAD_URL}`
-    );
-
     return {
       status: 'created' as const,
       employeeCode: result.employee.employeeCode,
@@ -290,11 +399,11 @@ export const processSmsOnboarding = async (payload: {
       replyMessage: `Welcome ${fullName}!\nID: ${result.employee.employeeCode}\nPass: ${result.generatedPassword}\nAPK: ${APK_DOWNLOAD_URL}`
     };
   } catch (error: any) {
-    if (error.message === 'SMS body must match: ID: <mobile_number> <employee_name>') {
+    if (error.message === 'SMS body must include ID and a mobile number') {
       return {
         status: 'invalid_format' as const,
         replyTo,
-        replyMessage: 'Invalid format. Please send: ID: <number> <name>'
+        replyMessage: 'Invalid format. Please send: ID: <mobile_number> <employee_name>'
       };
     }
 

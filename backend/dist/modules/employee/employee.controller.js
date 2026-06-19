@@ -117,6 +117,15 @@ const regeneratePassword = async (req, res) => {
 };
 exports.regeneratePassword = regeneratePassword;
 const smsOnboardingHandler = async (req, res) => {
+    const expectedSecret = process.env.SMS_GATEWAY_SECRET?.trim();
+    if (!expectedSecret) {
+        logger_1.default.error('SMS_GATEWAY_SECRET is not configured');
+        return res.status(500).json({ success: false, error: 'Gateway not configured' });
+    }
+    const receivedSecret = req.headers['x-gateway-secret'];
+    if (!receivedSecret || receivedSecret !== expectedSecret) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
     const payload = {
         sender: req.body.sender || req.body.from || req.body.msisdn || '',
         recipient: req.body.recipient || req.body.to || req.body.destination || '',
