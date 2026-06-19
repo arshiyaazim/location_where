@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/i;
+const BANGLADESH_MOBILE_PATTERN = /(?:\+?88)?01\d(?:[\s-]?\d){8}/;
 
 export const normalizePhoneNumber = (value: string) => {
   const digits = value.replace(/\D/g, '');
@@ -55,13 +56,26 @@ export const generateNextEmployeeCode = async (prisma: PrismaClient) => {
 };
 
 export const parseOnboardingSms = (rawMessage: string) => {
-  const match = rawMessage.trim().match(/^ID:\s*(\+?[\d\s-]+)\s+(.+)$/i);
-  if (!match) {
-    throw new Error('SMS body must match: ID: <mobile_number> <employee_name>');
+  const message = rawMessage.trim();
+  const idMatch = message.match(/^I\s*D\s*:?\s*(.+)$/i);
+  if (!idMatch) {
+    throw new Error('SMS body must include ID and a mobile number');
   }
 
+  const content = idMatch[1].trim();
+  const phoneMatch = content.match(BANGLADESH_MOBILE_PATTERN);
+  if (!phoneMatch) {
+    throw new Error('SMS body must include ID and a mobile number');
+  }
+
+  const phone = normalizePhoneNumber(phoneMatch[0]);
+  const fullName = content
+    .replace(phoneMatch[0], ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   return {
-    phone: normalizePhoneNumber(match[1]),
-    fullName: match[2].trim()
+    phone,
+    fullName: fullName || phone
   };
 };

@@ -9,6 +9,15 @@ const aws_1 = __importDefault(require("../../config/aws"));
 const client_s3_1 = require("@aws-sdk/client-s3");
 const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
 const encryption_1 = require("../../utils/encryption");
+const isS3Configured = () => Boolean(process.env.AWS_ACCESS_KEY_ID?.trim() &&
+    process.env.AWS_SECRET_ACCESS_KEY?.trim() &&
+    process.env.AWS_REGION?.trim() &&
+    process.env.AWS_S3_BUCKET?.trim());
+const assertS3Configured = () => {
+    if (!isS3Configured()) {
+        throw new Error('Call recording storage is not configured');
+    }
+};
 const logCall = async (employeeId, callData) => {
     return database_1.default.callLog.create({
         data: {
@@ -21,6 +30,7 @@ const logCall = async (employeeId, callData) => {
 };
 exports.logCall = logCall;
 const uploadRecording = async (callLogId, file, checksum) => {
+    assertS3Configured();
     if (!(0, encryption_1.verifyChecksum)(file.buffer, checksum)) {
         throw new Error('Recording checksum verification failed');
     }
@@ -42,6 +52,7 @@ const uploadRecording = async (callLogId, file, checksum) => {
 };
 exports.uploadRecording = uploadRecording;
 const getRecordingUrl = async (id) => {
+    assertS3Configured();
     const call = await database_1.default.callLog.findUnique({ where: { id } });
     if (!call || !call.recordingPath)
         throw new Error('Recording not found');

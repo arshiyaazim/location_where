@@ -11,6 +11,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const employee_routes_1 = __importDefault(require("./modules/employee/employee.routes"));
+const gateway_routes_1 = __importDefault(require("./modules/gateway/gateway.routes"));
 const location_routes_1 = __importDefault(require("./modules/location/location.routes"));
 const sim_routes_1 = __importDefault(require("./modules/sim/sim.routes"));
 const call_routes_1 = __importDefault(require("./modules/call/call.routes"));
@@ -31,6 +32,7 @@ app.use(express_1.default.urlencoded({ extended: true }));
 app.use(rateLimit_middleware_1.apiLimiter);
 app.use('/api/v1/auth', auth_routes_1.default);
 app.use('/api/v1/employees', employee_routes_1.default);
+app.use('/api/v1/gateway', gateway_routes_1.default);
 app.use('/api/v1/location', location_routes_1.default);
 app.use('/api/v1/sim', sim_routes_1.default);
 app.use('/api/v1/calls', call_routes_1.default);
@@ -52,12 +54,13 @@ app.use((err, req, res, next) => {
         code: err.code || 'INTERNAL_ERROR'
     });
 });
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
 const startServer = async () => {
     try {
         await (0, redis_1.connectRedis)();
-        app.listen(PORT, () => {
-            logger_1.default.info(`Server running on port ${PORT}`);
+        app.listen(PORT, HOST, () => {
+            logger_1.default.info(`Server running on port ${PORT} host ${HOST}`);
         });
     }
     catch (error) {

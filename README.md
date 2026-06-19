@@ -78,5 +78,6 @@ npm run dev
 ---
 
 ## ☁️ ভিপিএস সার্ভার ডিপ্লয়মেন্ট (VPS Deployment Guide)
+deployment url: locationwhere.iamazim.com
 সার্ভার: `iamazim.com` (5.189.131.48)
 প্রসেস ম্যানেজমেন্টের জন্য **PM2** এবং রিভার্স প্রক্সির জন্য **Nginx** ব্যবহার করা হয়েছে।
